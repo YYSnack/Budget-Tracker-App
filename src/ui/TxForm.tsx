@@ -53,6 +53,7 @@ export function TxForm({ target, onClose }: { target: FormTarget; onClose: () =>
   const [categoryId, setCategoryId] = useState<number | null>(initial.categoryId);
   const [notes, setNotes] = useState(initial.notes);
   const [recurring, setRecurring] = useState(false);
+  const [startOverride, setStartOverride] = useState<string | null>(null);
   const [scope, setScope] = useState<Scope>('this');
   const [rateStatus, setRateStatus] = useState('');
   const [busy, setBusy] = useState(false);
@@ -101,6 +102,8 @@ export function TxForm({ target, onClose }: { target: FormTarget; onClose: () =>
     (target.kind === 'tx' && target.tx.recurringId != null) || target.kind === 'projected';
   const lockedType = recurringLinked;
 
+  const entryMonth = isValidDate(date) ? date.slice(0, 7) : '';
+  const startMonth = startOverride ?? entryMonth;
   const amountNum = parseNumber(amount);
   const rateNum = currency === BASE ? 1 : parseNumber(rate);
   const minor = amountNum != null && amountNum > 0 ? toMinor(amountNum, currency) : null;
@@ -112,6 +115,7 @@ export function TxForm({ target, onClose }: { target: FormTarget; onClose: () =>
     if (!isValidDate(date)) return 'Enter a valid date';
     if (categoryId == null) return 'Choose a category';
     if (currency.length !== 3) return 'Enter a 3-letter currency code';
+    if (recurring && (!startMonth || startMonth > entryMonth)) return 'The first month can\'t be after the entry\'s date';
     if (rateNum == null || rateNum <= 0) return 'Enter an exchange rate';
     return null;
   })();
@@ -141,7 +145,7 @@ export function TxForm({ target, onClose }: { target: FormTarget; onClose: () =>
     if (problem) return toast(problem);
     const input = build();
     if (target.kind === 'new') {
-      return run(() => (recurring ? addRecurringTransaction(input) : addTransaction(input)), 'Saved');
+      return run(() => (recurring ? addRecurringTransaction(input, startMonth) : addTransaction(input)), 'Saved');
     }
     if (target.kind === 'tx') {
       const tx = target.tx;
@@ -177,12 +181,12 @@ export function TxForm({ target, onClose }: { target: FormTarget; onClose: () =>
       ? {
           this: 'This month only',
           future: 'This and future months',
-          all: 'All months (past and future)',
+          all: 'Every month of this recurring item',
         }
       : {
           this: 'This entry only',
-          future: 'This and future entries',
-          all: 'All entries (past and future)',
+          future: 'This and later entries',
+          all: 'Every entry of this recurring item',
         };
 
   return (
@@ -254,13 +258,31 @@ export function TxForm({ target, onClose }: { target: FormTarget; onClose: () =>
         </Field>
 
         {target.kind === 'new' && (
-          <label className="check">
-            <input type="checkbox" checked={recurring} onChange={(e) => setRecurring(e.target.checked)} />
-            <span>Repeat every month (on day {Number(date.slice(8)) || '–'})</span>
-          </label>
+          <>
+            <label className="check">
+              <input type="checkbox" checked={recurring} onChange={(e) => setRecurring(e.target.checked)} />
+              <span>Repeat every month (on day {Number(date.slice(8)) || '–'})</span>
+            </label>
+            {recurring && (
+              <Field
+                label="First month"
+                hint={
+                  startMonth && startMonth < entryMonth
+                    ? `Earlier months appear as "to confirm" so you can check them off. Nothing is counted until you confirm.`
+                    : 'Choose an earlier month to also add past months.'
+                }
+              >
+                <input type="month" value={startMonth} max={entryMonth}
+                  onChange={(e) => setStartOverride(e.target.value)} />
+              </Field>
+            )}
+          </>
         )}
 
         {recurringLinked && <ScopePicker value={scope} onChange={setScope} labels={scopeLabels} />}
+        {recurringLinked && scope !== 'this' && (
+          <p className="hint">This changes entries that already exist or are due. To add earlier months, change the item's first month on the Recurring tab.</p>
+        )}
 
         {problem && <p className="hint warn">{problem}</p>}
 

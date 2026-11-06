@@ -40,10 +40,16 @@ export function addTransaction(input: TxInput): Promise<number> {
   return db.transactions.add(buildTx(input));
 }
 
-/** Add a transaction and a monthly rule that it is the first occurrence of. */
-export function addRecurringTransaction(input: TxInput): Promise<number> {
+/**
+ * Add a transaction and a monthly rule it belongs to.
+ * `startMonth` may be earlier than the entry's month: the months in between then appear as
+ * unconfirmed (backfilled) occurrences. It can't be later than the entry's own month.
+ */
+export function addRecurringTransaction(input: TxInput, startMonth?: string): Promise<number> {
   return db.transaction('rw', db.transactions, db.recurring, async () => {
     const month = monthOf(input.date);
+    const start = startMonth ?? month;
+    if (start > month) throw new Error('The first month can\'t be after the entry\'s date');
     const ruleId = await db.recurring.add({
       type: input.type,
       amount: input.amount,
@@ -51,7 +57,7 @@ export function addRecurringTransaction(input: TxInput): Promise<number> {
       categoryId: input.categoryId,
       notes: input.notes.trim(),
       dayOfMonth: Number(input.date.slice(8)),
-      startMonth: month,
+      startMonth: start,
       endMonth: null,
     });
     return db.transactions.add(buildTx(input, { recurringId: ruleId, occurrence: month }));
@@ -185,6 +191,23 @@ export async function editRule(
     for (const t of linked) await db.transactions.update(t.id!, updates.get(t.id!)!);
   });
   return ruleId;
+}
+
+/**
+ * Move a rule's first month. Earlier = backfill (the new months show up as unconfirmed).
+ * Later is refused if entries you already confirmed would fall before the new start.
+ */
+export async function setRuleStart(ruleId: number, startMonth: string): Promise<void> {
+  const rule = await db.recurring.get(ruleId);
+  if (!rule) throw new Error('Recurring item not found');
+  if (rule.endMonth && startMonth > rule.endMonth) throw new Error('The first month is after the last month');
+  const linked = await db.transactions.where('recurringId').equals(ruleId).toArray();
+  const earliest = linked.reduce<string | null>(
+    (min, t) => (t.occurrence && (min == null || t.occurrence < min) ? t.occurrence : min), null);
+  if (earliest && startMonth > earliest) {
+    throw new Error(`You already confirmed an entry for ${earliest}, so the first month can't be later than that`);
+  }
+  await db.recurring.update(ruleId, { startMonth });
 }
 
 export function setRuleEnd(ruleId: number, endMonth: string | null): Promise<number> {

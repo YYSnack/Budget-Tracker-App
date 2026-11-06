@@ -4,7 +4,7 @@ import { db } from '../src/db';
 import {
   addCategory, addRecurringTransaction, addTransaction, confirmMany, editRule, exportBackup,
   restoreBackup, saveProjected, saveRecurringEntry, skipOccurrence, deleteRule, updateCategory,
-  validateBackup, type GetRate,
+  validateBackup, setRuleStart, type GetRate,
 } from '../src/ops';
 import { pendingUpTo, projectMonth } from '../src/lib/recurring';
 import { buildWorkbook } from '../src/lib/exportXlsx';
@@ -84,6 +84,28 @@ describe('recurring', () => {
     const txs = await db.transactions.toArray();
     expect(txs.every((t) => t.rate === 1.1 && t.amountBase === 5500)).toBe(true);
     expect((await state('2026-09')).proj).toHaveLength(0);
+  });
+
+  it('"first month" earlier than the entry backfills the months in between as to-confirm', async () => {
+    // entry in November, repeat starting from September
+    await addRecurringTransaction(rentInput({ date: '2026-11-05' }), '2026-09');
+    const rule = (await db.recurring.toArray())[0];
+    expect(rule.startMonth).toBe('2026-09');
+    expect((await state('2026-09')).proj).toHaveLength(1);
+    expect((await state('2026-10')).proj).toHaveLength(1);   // the month the user expected to see
+    expect((await state('2026-11')).proj).toHaveLength(0);   // already confirmed
+    expect((await state('2026-12')).proj).toHaveLength(1);
+    await expect(addRecurringTransaction(rentInput({ date: '2026-11-05' }), '2026-12')).rejects.toThrow(/after the entry/);
+  });
+
+  it('can move an existing rule\'s first month earlier, but not past a confirmed entry', async () => {
+    await addRecurringTransaction(rentInput({ date: '2026-11-05' })); // starts November
+    const r = (await db.recurring.toArray())[0];
+    expect((await state('2026-10')).proj).toHaveLength(0);
+    await setRuleStart(r.id!, '2026-10');
+    expect((await state('2026-10')).proj).toHaveLength(1);
+    await expect(setRuleStart(r.id!, '2026-12')).rejects.toThrow(/already confirmed an entry for 2026-11/);
+    expect((await db.recurring.get(r.id!))!.startMonth).toBe('2026-10');
   });
 
   it('skip, then restore', async () => {

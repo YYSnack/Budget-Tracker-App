@@ -4,7 +4,7 @@ import { currentMonth, monthLabel } from '../lib/dates';
 import { BASE, formatMoney, parseNumber, toInputString, toMinor } from '../lib/money';
 import { pendingUpTo } from '../lib/recurring';
 import { getRateToBase } from '../lib/rates';
-import { confirmMany, deleteRule, editRule, setRuleEnd } from '../ops';
+import { confirmMany, deleteRule, editRule, setRuleEnd, setRuleStart } from '../ops';
 import { db } from '../db';
 import type { RecurringRule, TxType } from '../types';
 import {
@@ -143,6 +143,8 @@ function RuleSheet({ rule, onClose }: { rule: RecurringRule | null; onClose: () 
         });
         toast('Added. Past months (if any) are waiting for confirmation.');
       } else {
+        // validate/apply the start month first so a refusal doesn't leave other edits half-saved
+        if (from === 'all' && startMonth !== rule.startMonth) await setRuleStart(rule.id!, startMonth);
         const id = await editRule(
           rule.id!,
           { amount: minor, currency, categoryId: categoryId!, notes, dayOfMonth: dayN },
@@ -189,8 +191,9 @@ function RuleSheet({ rule, onClose }: { rule: RecurringRule | null; onClose: () 
           <Field label="Day of month" hint={dayN > 28 ? 'Shorter months use their last day' : undefined}>
             <input inputMode="numeric" value={day} onChange={(e) => setDay(e.target.value)} />
           </Field>
-          <Field label="Starts">
-            <input type="month" value={startMonth} disabled={!!rule} onChange={(e) => setStartMonth(e.target.value)} />
+          <Field label="First month" hint={rule && from === 'future' ? 'Only editable when applying to all months' : undefined}>
+            <input type="month" value={startMonth} disabled={!!rule && from === 'future'}
+              onChange={(e) => setStartMonth(e.target.value)} />
           </Field>
         </div>
         <Field label="Last month (optional)" hint="Leave empty to repeat indefinitely">
@@ -202,7 +205,7 @@ function RuleSheet({ rule, onClose }: { rule: RecurringRule | null; onClose: () 
             <legend>Apply changes to</legend>
             <label className="radio">
               <input type="radio" name="from" checked={from === 'all'} onChange={() => setFrom('all')} />
-              <span>All months (past and future)</span>
+              <span>Every month of this item</span>
             </label>
             <label className="radio">
               <input type="radio" name="from" checked={from === 'future'} onChange={() => setFrom('future')} />
@@ -211,7 +214,7 @@ function RuleSheet({ rule, onClose }: { rule: RecurringRule | null; onClose: () 
             {from === 'future' && (
               <input type="month" value={fromMonth} min={rule.startMonth} onChange={(e) => setFromMonth(e.target.value)} />
             )}
-            <p className="hint">To change a single month, tap that month's entry in the Month tab and pick "This month only".</p>
+            <p className="hint">Choosing an earlier "First month" adds those past months as "to confirm". To change a single month, tap that month's entry in the Month tab and pick "This month only".</p>
           </fieldset>
         )}
         {problem && <p className="hint warn">{problem}</p>}
