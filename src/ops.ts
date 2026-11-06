@@ -1,7 +1,7 @@
 import { db } from './db';
-import { addMonths, dateFor, monthOf } from './lib/dates';
+import { addMonths, dateFor, monthOf, monthsBetween } from './lib/dates';
 import { toBase } from './lib/money';
-import type { Projection } from './lib/recurring';
+import { projectMonth, type Projection } from './lib/recurring';
 import type {
   Bucket, Category, Override, RecurringRule, Transaction, TxInput, TxType,
 } from './types';
@@ -45,7 +45,10 @@ export function addTransaction(input: TxInput): Promise<number> {
  * `startMonth` may be earlier than the entry's month: the months in between then appear as
  * unconfirmed (backfilled) occurrences. It can't be later than the entry's own month.
  */
-export function addRecurringTransaction(input: TxInput, startMonth?: string): Promise<number> {
+export function addRecurringTransaction(
+  input: TxInput,
+  startMonth?: string,
+): Promise<{ txId: number; ruleId: number }> {
   return db.transaction('rw', db.transactions, db.recurring, async () => {
     const month = monthOf(input.date);
     const start = startMonth ?? month;
@@ -60,7 +63,8 @@ export function addRecurringTransaction(input: TxInput, startMonth?: string): Pr
       startMonth: start,
       endMonth: null,
     });
-    return db.transactions.add(buildTx(input, { recurringId: ruleId, occurrence: month }));
+    const txId = await db.transactions.add(buildTx(input, { recurringId: ruleId, occurrence: month }));
+    return { txId, ruleId };
   });
 }
 
@@ -191,6 +195,28 @@ export async function editRule(
     for (const t of linked) await db.transactions.update(t.id!, updates.get(t.id!)!);
   });
   return ruleId;
+}
+
+/**
+ * Record (confirm) every unconfirmed, non-skipped occurrence of a rule from `fromMonth` to
+ * `toMonth` inclusive, at the rule's amount. Foreign-currency months use that date's exchange
+ * rate; any month whose rate can't be found is left as "to confirm" and returned in `failed`.
+ */
+export async function confirmRuleMonths(
+  ruleId: number,
+  fromMonth: string,
+  toMonth: string,
+  getRate: GetRate,
+): Promise<{ done: number; failed: Projection[] }> {
+  if (fromMonth > toMonth) return { done: 0, failed: [] };
+  const rule = await db.recurring.get(ruleId);
+  if (!rule) throw new Error('Recurring item not found');
+  const overrides = await db.overrides.where('recurringId').equals(ruleId).toArray();
+  const linked = await db.transactions.where('recurringId').equals(ruleId).toArray();
+  const items = monthsBetween(fromMonth, toMonth)
+    .flatMap((m) => projectMonth([rule], overrides, linked, m))
+    .filter((p) => !p.skipped);
+  return confirmMany(items, getRate);
 }
 
 /**

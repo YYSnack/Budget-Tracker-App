@@ -4,7 +4,7 @@ import { db } from '../src/db';
 import {
   addCategory, addRecurringTransaction, addTransaction, confirmMany, editRule, exportBackup,
   restoreBackup, saveProjected, saveRecurringEntry, skipOccurrence, deleteRule, updateCategory,
-  validateBackup, setRuleStart, type GetRate,
+  validateBackup, setRuleStart, confirmRuleMonths, type GetRate,
 } from '../src/ops';
 import { pendingUpTo, projectMonth } from '../src/lib/recurring';
 import { buildWorkbook } from '../src/lib/exportXlsx';
@@ -96,6 +96,31 @@ describe('recurring', () => {
     expect((await state('2026-11')).proj).toHaveLength(0);   // already confirmed
     expect((await state('2026-12')).proj).toHaveLength(1);
     await expect(addRecurringTransaction(rentInput({ date: '2026-11-05' }), '2026-12')).rejects.toThrow(/after the entry/);
+  });
+
+  it('records earlier months immediately; skips and already-confirmed months are left alone', async () => {
+    const { ruleId } = await addRecurringTransaction(rentInput({ date: '2026-11-05' }), '2026-07');
+    await skipOccurrence(ruleId, '2026-08');
+    const r = await confirmRuleMonths(ruleId, '2026-07', '2026-10', noRate);
+    expect(r).toEqual({ done: 3, failed: [] }); // Jul, Sep, Oct (Aug skipped)
+    const txs = (await db.transactions.toArray()).sort((a, b) => a.date.localeCompare(b.date));
+    expect(txs.map((t) => t.date)).toEqual(['2026-07-05', '2026-09-05', '2026-10-05', '2026-11-05']);
+    expect(txs.every((t) => t.recurringId === ruleId && t.amount === 200000)).toBe(true);
+    // running it again adds nothing (idempotent)
+    expect((await confirmRuleMonths(ruleId, '2026-07', '2026-10', noRate)).done).toBe(0);
+    expect(await confirmRuleMonths(ruleId, '2026-10', '2026-07', noRate)).toEqual({ done: 0, failed: [] });
+  });
+
+  it('foreign-currency past months use that date\'s rate; missing rates stay to-confirm', async () => {
+    const { ruleId } = await addRecurringTransaction(
+      rentInput({ date: '2026-11-05', currency: 'EUR', rate: 1.1, amount: 1000 }), '2026-09');
+    const failed = await confirmRuleMonths(ruleId, '2026-09', '2026-10', noRate);
+    expect(failed.done).toBe(0);
+    expect(failed.failed).toHaveLength(2);
+    expect((await state('2026-10')).proj).toHaveLength(1); // still waiting
+    const ok = await confirmRuleMonths(ruleId, '2026-09', '2026-10', eurRate);
+    expect(ok.done).toBe(2);
+    expect((await db.transactions.toArray()).filter((t) => t.occurrence === '2026-10')[0]).toMatchObject({ rate: 1.1, amountBase: 1100 });
   });
 
   it('can move an existing rule\'s first month earlier, but not past a confirmed entry', async () => {

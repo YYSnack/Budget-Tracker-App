@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useCategoryMap, useCategories, useRecurringState } from '../hooks';
-import { currentMonth, monthLabel } from '../lib/dates';
+import { addMonths, currentMonth, monthLabel } from '../lib/dates';
 import { BASE, formatMoney, parseNumber, toInputString, toMinor } from '../lib/money';
 import { pendingUpTo } from '../lib/recurring';
 import { getRateToBase } from '../lib/rates';
-import { confirmMany, deleteRule, editRule, setRuleEnd, setRuleStart } from '../ops';
+import { confirmMany, confirmRuleMonths, deleteRule, editRule, setRuleEnd, setRuleStart } from '../ops';
 import { db } from '../db';
 import type { RecurringRule, TxType } from '../types';
 import {
@@ -118,6 +118,7 @@ function RuleSheet({ rule, onClose }: { rule: RecurringRule | null; onClose: () 
   const [endMonth, setEndMonth] = useState(rule?.endMonth ?? '');
   const [from, setFrom] = useState<'all' | 'future'>('all');
   const [fromMonth, setFromMonth] = useState(currentMonth());
+  const [recordNow, setRecordNow] = useState(true);
   const [busy, setBusy] = useState(false);
 
   const n = parseNumber(amount);
@@ -130,6 +131,8 @@ function RuleSheet({ rule, onClose }: { rule: RecurringRule | null; onClose: () 
     : !/^\d{4}-\d{2}$/.test(startMonth) ? 'Choose a start month'
     : endMonth && endMonth < startMonth ? 'End month is before the start'
     : null;
+
+  const movedEarlier = !!rule && from === 'all' && startMonth < rule.startMonth;
 
   async function save() {
     if (problem) return toast(problem);
@@ -152,7 +155,14 @@ function RuleSheet({ rule, onClose }: { rule: RecurringRule | null; onClose: () 
         );
         const newEnd = endMonth || null;
         if (newEnd !== rule.endMonth) await setRuleEnd(id, newEnd);
-        toast('Saved');
+        if (movedEarlier && recordNow) {
+          const { done, failed } = await confirmRuleMonths(id, startMonth, addMonths(rule.startMonth, -1), getRateToBase);
+          toast(
+            failed.length
+              ? `Saved. Added ${done} earlier month${done === 1 ? '' : 's'}; ${failed.length} need an exchange rate and are waiting above.`
+              : `Saved. Added ${done} earlier month${done === 1 ? '' : 's'}.`,
+          );
+        } else toast('Saved');
       }
       onClose();
     } catch (e) {
@@ -196,6 +206,12 @@ function RuleSheet({ rule, onClose }: { rule: RecurringRule | null; onClose: () 
               onChange={(e) => setStartMonth(e.target.value)} />
           </Field>
         </div>
+        {movedEarlier && (
+          <label className="check">
+            <input type="checkbox" checked={recordNow} onChange={(e) => setRecordNow(e.target.checked)} />
+            <span>Record the added earlier months now, at this amount (otherwise they wait as "to confirm")</span>
+          </label>
+        )}
         <Field label="Last month (optional)" hint="Leave empty to repeat indefinitely">
           <input type="month" value={endMonth} onChange={(e) => setEndMonth(e.target.value)} />
         </Field>
@@ -214,7 +230,7 @@ function RuleSheet({ rule, onClose }: { rule: RecurringRule | null; onClose: () 
             {from === 'future' && (
               <input type="month" value={fromMonth} min={rule.startMonth} onChange={(e) => setFromMonth(e.target.value)} />
             )}
-            <p className="hint">Choosing an earlier "First month" adds those past months as "to confirm". To change a single month, tap that month's entry in the Month tab and pick "This month only".</p>
+            <p className="hint">Choosing an earlier "First month" adds those past months. To change a single month, tap that month's entry in the Month tab and pick "This month only".</p>
           </fieldset>
         )}
         {problem && <p className="hint warn">{problem}</p>}

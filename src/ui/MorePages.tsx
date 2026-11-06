@@ -28,6 +28,7 @@ export function More({ sub, setSub, children }: { sub: MoreSub; setSub: (s: More
           ))}
         </ul>
         <p className="hint">Your data is stored only on this device, in this browser. Use Export &amp; backup regularly.</p>
+        <p className="hint">App version: {__APP_VERSION__}</p>
       </div>
     );
   }

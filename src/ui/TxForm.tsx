@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { getSetting, setSetting } from '../db';
 import { useCategories } from '../hooks';
-import { dateLabel, isValidDate, todayStr } from '../lib/dates';
+import { addMonths, dateLabel, isValidDate, monthsBetween, todayStr } from '../lib/dates';
 import { BASE, formatBase, parseNumber, toBase, toInputString, toMinor } from '../lib/money';
 import type { Projection } from '../lib/recurring';
 import { getRateToBase } from '../lib/rates';
 import {
-  addRecurringTransaction, addTransaction, deleteTransaction, saveProjected, saveRecurringEntry,
+  addRecurringTransaction, addTransaction, confirmRuleMonths, deleteTransaction, saveProjected, saveRecurringEntry,
   skipOccurrence, updateTransaction, type Scope,
 } from '../ops';
 import type { Transaction, TxInput, TxType } from '../types';
@@ -54,6 +54,7 @@ export function TxForm({ target, onClose }: { target: FormTarget; onClose: () =>
   const [notes, setNotes] = useState(initial.notes);
   const [recurring, setRecurring] = useState(false);
   const [startOverride, setStartOverride] = useState<string | null>(null);
+  const [recordPast, setRecordPast] = useState(true);
   const [scope, setScope] = useState<Scope>('this');
   const [rateStatus, setRateStatus] = useState('');
   const [busy, setBusy] = useState(false);
@@ -129,11 +130,11 @@ export function TxForm({ target, onClose }: { target: FormTarget; onClose: () =>
   async function run(fn: () => Promise<unknown>, done: string) {
     setBusy(true);
     try {
-      await fn();
+      const result = await fn();
       if (currency !== BASE || (await getSetting('lastCurrency', BASE)) !== BASE) {
         await setSetting('lastCurrency', currency);
       }
-      toast(done);
+      toast(typeof result === 'string' ? result : done);
       onClose();
     } catch (e) {
       toast(errMsg(e));
@@ -145,7 +146,15 @@ export function TxForm({ target, onClose }: { target: FormTarget; onClose: () =>
     if (problem) return toast(problem);
     const input = build();
     if (target.kind === 'new') {
-      return run(() => (recurring ? addRecurringTransaction(input, startMonth) : addTransaction(input)), 'Saved');
+      if (!recurring) return run(() => addTransaction(input), 'Saved');
+      return run(async () => {
+        const { ruleId } = await addRecurringTransaction(input, startMonth);
+        if (!recordPast || startMonth >= entryMonth) return;
+        const { done, failed } = await confirmRuleMonths(ruleId, startMonth, addMonths(entryMonth, -1), getRate);
+        return failed.length
+          ? `Saved. Added ${done} earlier month${done === 1 ? '' : 's'}; ${failed.length} need an exchange rate and are waiting on the Recurring tab.`
+          : `Saved. Added ${done} earlier month${done === 1 ? '' : 's'}.`;
+      }, 'Saved');
     }
     if (target.kind === 'tx') {
       const tx = target.tx;
@@ -264,17 +273,25 @@ export function TxForm({ target, onClose }: { target: FormTarget; onClose: () =>
               <span>Repeat every month (on day {Number(date.slice(8)) || '–'})</span>
             </label>
             {recurring && (
-              <Field
-                label="First month"
-                hint={
-                  startMonth && startMonth < entryMonth
-                    ? `Earlier months appear as "to confirm" so you can check them off. Nothing is counted until you confirm.`
-                    : 'Choose an earlier month to also add past months.'
-                }
-              >
-                <input type="month" value={startMonth} max={entryMonth}
-                  onChange={(e) => setStartOverride(e.target.value)} />
-              </Field>
+              <>
+                <Field
+                  label="First month"
+                  hint={startMonth < entryMonth ? undefined : 'Pick an earlier month to also add past months.'}
+                >
+                  <input type="month" value={startMonth} max={entryMonth}
+                    onChange={(e) => setStartOverride(e.target.value)} />
+                </Field>
+                {startMonth && startMonth < entryMonth && (
+                  <label className="check">
+                    <input type="checkbox" checked={recordPast} onChange={(e) => setRecordPast(e.target.checked)} />
+                    <span>
+                      Record the {monthsBetween(startMonth, addMonths(entryMonth, -1)).length} earlier month
+                      {monthsBetween(startMonth, addMonths(entryMonth, -1)).length === 1 ? '' : 's'} now, at this amount
+                      (otherwise they wait as "to confirm")
+                    </span>
+                  </label>
+                )}
+              </>
             )}
           </>
         )}

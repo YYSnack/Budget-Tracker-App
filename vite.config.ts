@@ -5,8 +5,11 @@ import { VitePWA } from 'vite-plugin-pwa';
 // Hosted under a sub-path on GitHub Pages (e.g. /Budget-Tracker-App/); the deploy workflow sets BASE_PATH.
 const base = process.env.BASE_PATH ?? '/';
 
+const version = (process.env.GITHUB_SHA ?? 'dev').slice(0, 7);
+
 export default defineConfig({
   base,
+  define: { __APP_VERSION__: JSON.stringify(version) },
   plugins: [
     react(),
     VitePWA({
