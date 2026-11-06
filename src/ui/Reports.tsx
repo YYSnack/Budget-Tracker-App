@@ -6,7 +6,7 @@ import { useCategories, useMonthTxs, useYearTxs } from '../hooks';
 import { addMonths, currentMonth, monthLabel, monthName, parseMonth } from '../lib/dates';
 import { formatBase } from '../lib/money';
 import {
-  average, byBucket, byCategory, compare, monthSeries, monthsForAverage, totals, type CompareRow,
+  average, byBucket, formatPctChange, byCategory, compare, monthSeries, monthsForAverage, totals, type CompareRow,
   type Slice,
 } from '../lib/reports';
 import { Empty, MonthNav, Segmented } from './common';
@@ -177,10 +177,7 @@ function CompareTable({
         <td>{name}</td>
         <td className="num">{formatBase(c)}</td>
         <td className="num">{formatBase(p)}</td>
-        <td className={`num ${cls(d)}`}>
-          {d > 0 ? '+' : d < 0 ? '−' : ''}{formatBase(Math.abs(d))}
-          <small> {p ? `${d > 0 ? '+' : d < 0 ? '−' : ''}${Math.abs((d / p) * 100).toFixed(0)}%` : 'new'}</small>
-        </td>
+        <td className={`num ${cls(d)}`}>{formatPctChange(c, p)}</td>
       </tr>
     );
   };
@@ -188,7 +185,7 @@ function CompareTable({
     <div className="scroll-x">
       <table className="table">
         <thead>
-          <tr><th></th><th className="num">{currentLabel}</th><th className="num">{previousLabel}</th><th className="num">Change</th></tr>
+          <tr><th></th><th className="num">{currentLabel}</th><th className="num">{previousLabel}</th><th className="num">Change (%)</th></tr>
         </thead>
         <tbody>
           {rows.map((r) => row(r.name, r.current, r.previous))}

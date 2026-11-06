@@ -3,7 +3,7 @@ import { addMonths, dateFor, daysInMonth, monthsBetween } from '../src/lib/dates
 import { decimals, formatBase, parseNumber, toBase, toMinor } from '../src/lib/money';
 import { pendingUpTo, projectMonth } from '../src/lib/recurring';
 import {
-  byBucket, byCategory, compare, monthSeries, monthsForAverage, totals,
+  byBucket, byCategory, compare, formatPctChange, monthSeries, monthsForAverage, totals,
 } from '../src/lib/reports';
 import {
   descKey, detectDateFormat, guessMapping, parseCsvText, parseDate, toCandidates,
@@ -131,6 +131,16 @@ describe('reports', () => {
     expect(rent.delta).toBe(20000);
     expect(rent.pct).toBeCloseTo(25, 5);
     expect(rows.find((r) => r.name === 'Misc')!.pct).toBeNull();
+  });
+  it('formats period-over-period change as a percentage', () => {
+    expect(formatPctChange(125, 100)).toBe('+25.0%');
+    expect(formatPctChange(75, 100)).toBe('−25.0%');
+    expect(formatPctChange(100, 100)).toBe('0.0%');
+    expect(formatPctChange(10001, 10000)).toBe('0.0%');
+    expect(formatPctChange(111, 100)).toBe('+11.0%');
+    expect(formatPctChange(0, 100)).toBe('−100.0%');
+    expect(formatPctChange(50, 0)).toBe('new');
+    expect(formatPctChange(0, 0)).toBe('–');
   });
   it('averages over elapsed months in the current year', () => {
     const now = new Date(2026, 10, 6);

@@ -151,3 +151,12 @@ export function compare(
   });
   return rows.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta) || a.name.localeCompare(b.name));
 }
+
+/** Period-over-period change as a signed percentage, e.g. "+12.5%". "new" if nothing before; "–" if both zero. */
+export function formatPctChange(current: number, previous: number): string {
+  if (previous === 0) return current === 0 ? '–' : 'new';
+  const pct = ((current - previous) / previous) * 100;
+  const rounded = Math.round(Math.abs(pct) * 10) / 10;
+  if (rounded === 0) return '0.0%';
+  return `${pct > 0 ? '+' : '−'}${rounded.toFixed(1)}%`;
+}
